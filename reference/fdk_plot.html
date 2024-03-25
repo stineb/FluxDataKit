@@ -74,7 +74,13 @@ by FluxDataKit).</p>
     </div>
 
     <div id="ref-usage">
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">fdk_plot</span><span class="op">(</span><span class="va">df</span>, site <span class="op">=</span> <span class="st">"sitename"</span>, out_path <span class="op">=</span> <span class="st">"data/tmp"</span>, overwrite <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">fdk_plot</span><span class="op">(</span></span>
+<span>  <span class="va">df</span>,</span>
+<span>  site <span class="op">=</span> <span class="st">"sitename"</span>,</span>
+<span>  out_path <span class="op">=</span> <span class="st">"data/tmp"</span>,</span>
+<span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  daily <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div id="arguments">
@@ -94,6 +100,10 @@ by FluxDataKit).</p>
 <dt>overwrite</dt>
 <dd><p>overwrite existing files (TRUE or FALSE)
 stored</p></dd>
+
+
+<dt>daily</dt>
+<dd><p>whether daily or hourly data is to be plotted, defaults to FALSE.</p></dd>
 
 </dl></div>
     <div id="value">
