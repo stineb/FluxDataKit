@@ -15,6 +15,7 @@
 #' @param site sitename of a site to process
 #' @param out_path the path where to store the converted data
 #' @param overwrite overwrite existing output file
+#' @param interpret_timestamp logical specifying whether to interpret timestamp
 #'
 #' @return data frame with daily (DD) down sampled values or file in the
 #'  FLUXNET format
@@ -24,37 +25,44 @@ fdk_downsample_fluxnet <- function(
     df,
     site,
     out_path,
-    overwrite = FALSE
-){
-
+    interpret_timestamp = TRUE,
+    overwrite = FALSE) {
   # Using the FLUXNET instructions, however in some cases there will
   # be no equivalence giving missing information. Downsampled data should
   # therefore not be considered equal to the original FLUXNET/ONEFLUX
   # processing chain.
   # https://fluxnet.org/data/fluxnet2015-dataset/fullset-data-product/
 
-  df <- df |>
-    dplyr::mutate(
-      TIMESTAMP = as.Date(TIMESTAMP_START, "%Y%m%d%H%M")
-      )
+  if (interpret_timestamp){
+    df <- df |>
+      dplyr::mutate(
+        # TIMESTAMP = as.Date(TIMESTAMP_START, "%Y%m%d%H%M")
+        TIMESTAMP_START = lubridate::ymd_hm(as.character(TIMESTAMP_START))
+      ) |>
+      dplyr::mutate(
+        TIMESTAMP = as_date(TIMESTAMP_START)
+      ) |>
+      mutate(across(where(is.numeric), ~ na_if(., -9999)))
+  }
 
-  start_year <- format(min(df$TIMESTAMP), "%Y")
-  end_year <- format(max(df$TIMESTAMP), "%Y")
+  start_year <- min(lubridate::year(df$TIMESTAMP))
+  end_year <- max(lubridate::year(df$TIMESTAMP))
 
-  filename <- sprintf("FLX_%s_PLUMBER_FULLSET_DD_%s_%s_2-3.csv",
-                      site,
-                      start_year,
-                      end_year
+  filename <- sprintf(
+    "FLX_%s_FLUXDATAKIT_FULLSET_DD_%s_%s_2-3.csv",
+    site,
+    start_year,
+    end_year
   )
 
-  if(!missing(out_path)){
+  if (!missing(out_path)) {
     filename <- file.path(
       out_path,
       filename
     )
   }
 
-  if(file.exists(filename) & !overwrite){
+  if (file.exists(filename) & !overwrite) {
     return(invisible())
   }
 
@@ -120,12 +128,12 @@ fdk_downsample_fluxnet <- function(
     dplyr::select(which(!(colnames(output_columns) %in% colnames(df))))
 
   # if the columns are missing bind them to the current data frame
-  if (ncol(missing_columns) > 0){
-      df <- dplyr::bind_cols(df, missing_columns)
+  if (ncol(missing_columns) > 0) {
+    df <- dplyr::bind_cols(df, missing_columns)
   }
 
   # determine daytime threshold based on 1% quantile of solar radiation
-  daytime_thresh <- stats::quantile(df$SW_IN_F_MDS, probs = 0.1)
+  daytime_thresh <- stats::quantile(df$SW_IN_F_MDS, probs = 0.1, na.rm = TRUE)
 
   # get daytime averages separately
   df_day <- df |>
@@ -139,8 +147,28 @@ fdk_downsample_fluxnet <- function(
 
       # VPD as the mean of the daytime values
       VPD_DAY_F_MDS = mean(VPD_F_MDS, na.rm = TRUE),
-
     )
+
+  # debug
+  visdat::vis_miss(
+    df |>
+      select(
+        TIMESTAMP,
+        SW_IN_F_MDS,
+        TA_F_MDS,
+        VPD_F_MDS,
+        LW_IN_F_MDS,
+        WS_F,
+        NEE_VUT_REF,
+        GPP_NT_VUT_REF,
+        GPP_DT_VUT_REF,
+        RECO_NT_VUT_REF,
+        NETRAD, USTAR,
+        LE_F_MDS,
+        LE_CORR
+      ),
+    warn_large_data = FALSE
+  )
 
   # downsample the data to a daily time step
   # using FLUXNET naming conventions
@@ -164,7 +192,6 @@ fdk_downsample_fluxnet <- function(
       # temperature is the mean of the HH values
       TA_F_MDS_mean = mean(TA_F_MDS, na.rm = TRUE),
       TA_F_MDS_QC = mean(TA_F_MDS_QC < 2, na.rm = TRUE),
-
       TMIN_F_MDS = min(TA_F_MDS, na.rm = TRUE),
       TMAX_F_MDS = max(TA_F_MDS, na.rm = TRUE),
 
@@ -219,10 +246,8 @@ fdk_downsample_fluxnet <- function(
       # add fraction of daily "missing values"
       NETRAD = mean(NETRAD, na.rm = TRUE),
       NETRAD_QC = mean(NETRAD_QC < 2, na.rm = TRUE),
-
       USTAR = mean(USTAR, na.rm = TRUE),
       USTAR_QC = mean(USTAR_QC < 2, na.rm = TRUE),
-
       SW_OUT = mean(SW_OUT, na.rm = TRUE),
       # SW_OUT_QC = mean(SW_OUT_QC < 2, na.rm = TRUE),
 
@@ -230,7 +255,6 @@ fdk_downsample_fluxnet <- function(
       # add fraction of daily "missing values"
       LE_F_MDS = mean(LE_F_MDS, na.rm = FALSE),
       LE_F_MDS_QC = mean(LE_F_MDS_QC < 2, na.rm = FALSE),
-
       LE_CORR = mean(LE_CORR, na.rm = FALSE),
       LE_CORR_QC = mean(LE_CORR_QC < 2, na.rm = FALSE),
 
@@ -238,7 +262,6 @@ fdk_downsample_fluxnet <- function(
       # add fraction of daily "missing values"
       H_F_MDS = mean(H_F_MDS, na.rm = FALSE),
       H_F_MDS_QC = mean(H_F_MDS_QC < 2, na.rm = FALSE),
-
       H_CORR = mean(H_CORR, na.rm = FALSE),
       H_CORR_QC = mean(H_CORR_QC < 2, na.rm = FALSE),
 
@@ -256,7 +279,6 @@ fdk_downsample_fluxnet <- function(
       LAI = mean(LAI, na.rm = TRUE),
       FPAR = mean(FPAR, na.rm = TRUE)
     ) |>
-
     # rename back. This is necessary to avoid bug
     dplyr::rename(
       TA_F_MDS = TA_F_MDS_mean
@@ -305,19 +327,20 @@ fdk_downsample_fluxnet <- function(
     dplyr::summarise(
       dplyr::across(
         dplyr::all_of(vars),
-        ~sum(is.na(.))
-        )) |>
+        ~ sum(is.na(.))
+      )
+    ) |>
     tidyr::pivot_longer(everything()) |>
     dplyr::filter(value > 0) |>
     dplyr::pull(name)
 
   # Air temperature: interpolate linearly, if gap <30 days
-  if ("TA_F_MDS" %in% missing){
+  if ("TA_F_MDS" %in% missing) {
     df <- interpolate2daily_TA_F_MDS(df)
   }
 
   # Shortwave radiation: impute with KNN
-  if ("SW_IN_F_MDS" %in% missing){
+  if ("SW_IN_F_MDS" %in% missing) {
     df <- fdk_impute_knn(
       df,
       target = "SW_IN_F_MDS",
@@ -327,7 +350,7 @@ fdk_downsample_fluxnet <- function(
   }
 
   # Longwave radiation: impute with KNN
-  if ("LW_IN_F_MDS" %in% missing){
+  if ("LW_IN_F_MDS" %in% missing) {
     df <- fdk_impute_knn(
       df,
       target = "LW_IN_F_MDS",
@@ -337,17 +360,17 @@ fdk_downsample_fluxnet <- function(
   }
 
   # Daytime temperature: impute with KNN
-  if ("TA_DAY_F_MDS" %in% missing){
+  if ("TA_DAY_F_MDS" %in% missing) {
     df <- fdk_impute_knn(
       df,
       target = "TA_DAY_F_MDS",
       pred1 = "TA_F_MDS",
       k = 5
-      )
+    )
   }
 
   # Daily minimum temperature: impute with KNN
-  if ("TMIN_F_MDS" %in% missing){
+  if ("TMIN_F_MDS" %in% missing) {
     df <- fdk_impute_knn(
       df,
       target = "TMIN_F_MDS",
@@ -357,7 +380,7 @@ fdk_downsample_fluxnet <- function(
   }
 
   # Daily maximum temperature: impute with KNN
-  if ("TMAX_F_MDS" %in% missing){
+  if ("TMAX_F_MDS" %in% missing) {
     df <- fdk_impute_knn(
       df,
       target = "TMAX_F_MDS",
@@ -367,7 +390,7 @@ fdk_downsample_fluxnet <- function(
   }
 
   # VPD: impute with KNN
-  if ("VPD_F_MDS" %in% missing){
+  if ("VPD_F_MDS" %in% missing) {
     df <- fdk_impute_knn(
       df,
       target = "VPD_F_MDS",
@@ -377,7 +400,7 @@ fdk_downsample_fluxnet <- function(
   }
 
   # Daytime VPD: impute with KNN
-  if ("VPD_DAY_F_MDS" %in% missing){
+  if ("VPD_DAY_F_MDS" %in% missing) {
     df <- fdk_impute_knn(
       df,
       target = "VPD_DAY_F_MDS",
@@ -388,22 +411,22 @@ fdk_downsample_fluxnet <- function(
   }
 
   # CO2: interpolate
-  if ("CO2_F_MDS" %in% missing){
+  if ("CO2_F_MDS" %in% missing) {
     df <- interpolate2daily_CO2_F_MDS(df)
   }
 
   # Atmospheric pressure: interpolate
-  if ("PA_F" %in% missing){
+  if ("PA_F" %in% missing) {
     df <- interpolate2daily_PA_F(df)
   }
 
   # fAPAR: interpolate
-  if ("FPAR" %in% missing){
+  if ("FPAR" %in% missing) {
     df <- interpolate2daily_fpar(df)
   }
 
   # Wind speed: interpolate
-  if ("WS_F" %in% missing){
+  if ("WS_F" %in% missing) {
     df <- interpolate2daily_WS_F(df)
   }
 
@@ -412,20 +435,20 @@ fdk_downsample_fluxnet <- function(
     dplyr::summarise(
       dplyr::across(
         dplyr::all_of(vars),
-        ~sum(is.na(.))
-      )) |>
+        ~ sum(is.na(.))
+      )
+    ) |>
     tidyr::pivot_longer(everything()) |>
     dplyr::filter(value > 0) |>
     dplyr::pull(name)
 
-  if (length(missing) > 0){
+  if (length(missing) > 0) {
     message(paste("!!! still missing values:"))
     message(paste(missing, collapse = ","))
   }
 
   # save data to file, using FLUXNET formatting
   if (!missing(out_path)) {
-
     utils::write.table(
       df,
       file = filename,
@@ -439,7 +462,6 @@ fdk_downsample_fluxnet <- function(
     message(sprintf("   %s", filename))
 
     return(invisible(filename))
-
   } else {
     # return the merged file
     return(df)

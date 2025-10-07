@@ -11,7 +11,7 @@
 # load libraries
 library(FluxDataKit)
 
- # download the modis data
+# download the modis data
 fdk_download_modis(
   df = fdk_site_info,
   path = "~/data/FluxDataKit/FDK_inputs/modis/"

@@ -20,21 +20,23 @@
 fdk_download_modis <- function(
     df,
     path,
-    force = FALSE
-) {
-
+    force = FALSE) {
   #----- settings and startup -----
 
-  apply(df, 1, function(x){
+  df_sites_network <- MODISTools::mt_sites(network = "FLUXNET") |>
+    as_tibble()
 
+  apply(df, 1, function(x) {
     # Exception for US-ORv, wetland site with no MODIS LAI available
-    if (x['sitename'] == "US-ORv") {return(NULL)}
+    if (x["sitename"] == "US-ORv") {
+      return(NULL)
+    }
 
     # extract the range of the data to consider
     # and where required extrapolate to missing
     # years
-    start_year <- as.numeric(x['year_start'])
-    end_year <- as.numeric(x['year_end'])
+    start_year <- as.numeric(x["year_start"])
+    end_year <- as.numeric(x["year_end"])
 
     # set products and band names for the
     # download
@@ -49,35 +51,55 @@ fdk_download_modis <- function(
 
     #----- data download -----
 
-    filename <- file.path(path, paste0(x['sitename'], "_MODIS_data.csv"))
+    filename <- file.path(path, paste0(x["sitename"], "_MODIS_data.csv"))
 
     # Check if data exists, if not download
     # override with force (to force a new download)
-    if(file.exists(filename)){
-      if(!force){
+    if (file.exists(filename)) {
+      if (!force) {
         message(paste0("The file: ", filename, " exists, skipping!
                        Use force = TRUE to redownload existing files."))
         return(NULL)
       }
     }
 
-    # downloading data
-    df_modis <- try(
-      MODISTools::mt_subset(
-        site_name = as.character(x['sitename']),
-        lat = x['lat'],
-        lon = x['lon'],
-        product = product,
-        band = bands,
-        start = "2000-01-01",
-        end = format(Sys.time(), "%Y-%m-%d"),
-        km_lr = 1,
-        km_ab = 1,
-        internal = TRUE
-      )
-    )
+    is_part_of_network <- df_sites_network |>
+      filter(network_siteid == x['sitename']) |>
+      nrow() > 0
 
-    if(inherits(df_modis, "try-error") ) {
+    # downloading data
+    if (is_part_of_network) {
+      df_modis <- try(
+        MODISTools::mt_subset(
+          product = product,
+          band = bands,
+          start = "2000-01-01",
+          end = format(Sys.time(), "%Y-%m-%d"),
+          site_id = site,
+          network = "fluxnet",
+          km_lr = 1,
+          km_ab = 1,
+          internal = TRUE
+        )
+      )
+    } else {
+      df_modis <- try(
+        MODISTools::mt_subset(
+          site_name = as.character(x["sitename"]),
+          lat = x["lat"],
+          lon = x["lon"],
+          product = product,
+          band = bands,
+          start = "2000-01-01",
+          end = format(Sys.time(), "%Y-%m-%d"),
+          km_lr = 1,
+          km_ab = 1,
+          internal = TRUE
+        )
+      )
+    }
+
+    if (inherits(df_modis, "try-error")) {
       warning("MODIS data download failed")
       return(NULL)
     }
@@ -91,6 +113,5 @@ fdk_download_modis <- function(
       quote = FALSE,
       sep = ","
     )
-
   })
 }

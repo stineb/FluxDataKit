@@ -1,4 +1,3 @@
-
 #' match MODIS LAI/FPAR to ERA data
 #'
 #' Downloads and smooths MODIS LAI/FPAR values
@@ -14,6 +13,8 @@
 #' @param df data frame with site info
 #' @param path path where to store the MODIS data
 #' @param nc_file netcdf file containing the LSM processed flux data
+#' @param csv_file a FLUXNET standard CSV file (full path) into which the
+#' MODIS data will be included.
 #'
 #' @return smoothed time series of LAI/FPAR integrated in the meteorological
 #' (ERA) data
@@ -22,20 +23,32 @@
 fdk_match_modis <- function(
     df,
     path,
-    nc_file
-) {
+    nc_file = NA,
+    csv_file = NA) {
 
   #----- settings and startup -----
+  if (is.na(nc_file) && is.na(csv_file)) {
+    warning("Arguments nc_file and csv_file are both missing. At least one must be provided.")
+  } else if (!(is.na(nc_file)) && !(is.na(csv_file))) {
+    warning("Arguments nc_file and csv_file are both non-missing. Specify only one.")
+  }
 
   # Exception for US-ORv, wetland site with no MODIS LAI available
-  if (df['sitename'] == "US-ORv") return(NULL)
+  if (df["sitename"] == "US-ORv") {
+    return(NULL)
+  }
+
+  site <- df |>
+    pull(sitename)
 
   df_modis <- try(read.table(
-    file.path(path, paste0(df["sitename"],"_MODIS_data.csv")),
+    file.path(
+      path,
+      paste0(site, "_MODIS_data.csv")
+      ),
     sep = ",",
     header = TRUE
-  )
-  )
+  ))
 
   if (inherits(df_modis, "try-error")) {
     warning("MODIS data not found, please download data for this site.")
@@ -49,8 +62,9 @@ fdk_match_modis <- function(
     dplyr::mutate(
       scale = ifelse(scale == "Not Available", NA, scale),
       value = ifelse(!is.na(scale),
-                     value * as.numeric(scale),
-                     value),
+        value * as.numeric(scale),
+        value
+      ),
       calendar_date = as.Date(calendar_date, "%Y-%m-%d")
     )
 
@@ -63,22 +77,26 @@ fdk_match_modis <- function(
 
   df_modis <- df_modis |>
     dplyr::rename(
-      'lai' = 'Lai_500m',
-      'sd_lai' = 'LaiStdDev_500m',
-      'sd_fpar' = 'FparStdDev_500m',
-      'fpar' = 'Fpar_500m',
-      'qc' = 'FparLai_QC'
+      "lai" = "Lai_500m",
+      "sd_lai" = "LaiStdDev_500m",
+      "sd_fpar" = "FparStdDev_500m",
+      "fpar" = "Fpar_500m",
+      "qc" = "FparLai_QC"
     )
 
   # Extracting pixels in the center and immediately around it (*)
   # These correspond to a radius of 500 m around site coordinates
-  pixel_no <- c(7, 8, 9,
-                12, 13, 14,
-                17, 18, 19)
+  pixel_no <- c(
+    7,   8,  9,
+    12, 13, 14,
+    17, 18, 19
+  )
 
   # Use only good quality data
   # Random bit integer format, ask Martin if need to work these out again...
   qc_flags <- c(0, 2, 24, 26, 32, 34, 56, 58)
+
+  # look at example pixel
 
   df_modis <- df_modis |>
     filter(
@@ -98,8 +116,8 @@ fdk_match_modis <- function(
   df_modis_mean <- df_modis |>
     group_by(site, calendar_date) |>
     mutate(
-      weights_lai = (1/sd_lai^2)/sum(1/sd_lai^2),
-      weights_fpar = (1/sd_fpar^2)/sum(1/sd_fpar^2),
+      weights_lai = (1 / sd_lai^2) / sum(1 / sd_lai^2),
+      weights_fpar = (1 / sd_fpar^2) / sum(1 / sd_fpar^2),
     ) |>
     dplyr::summarize(
       lai = stats::weighted.mean(lai, w = weights_lai, na.rm = TRUE),
@@ -116,20 +134,42 @@ fdk_match_modis <- function(
   # expand to match the data range of the
   # flux data
 
-  start_date <- as.Date(paste0(df['year_start'],"-01-01"))
-  end_date <-as.Date(paste0(df['year_end'],"-12-31"))
+  if (!is.na(nc_file)){
+    #---- netcdf file to get time vector ----
+    # open netcdf file for writing
+    site_nc <- ncdf4::nc_open(nc_file, write = TRUE)
 
-  if (start_date > min(df_modis$calendar_date, na.rm = TRUE)){
+    # Get timing info for site
+    site_start_time <- ncdf4::ncatt_get(site_nc, "time")$units
+    site_time <- ncdf4::ncvar_get(site_nc, "time")
+    site_tstep_size <- 86400 / (site_time[2] - site_time[1])
+
+    # Extract year
+    start_year <- as.numeric(substr(site_start_time, start = 15, stop = 18))
+    site_time <- as.Date(as.POSIXct(site_time, origin = sprintf("%s-01-01", start_year)))
+
+  } else {
+    site_time <- read.csv(csv_file) |>
+      dplyr::mutate(TIMESTAMP = lubridate::ymd(TIMESTAMP)) |>
+      dplyr::select(TIMESTAMP) |>
+      dplyr::distinct() |>
+      dplyr::arrange(TIMESTAMP) |>
+      pull(TIMESTAMP)
+  }
+  start_date <- min(site_time)
+  end_date <- max(site_time)
+
+  if (start_date > min(df_modis$calendar_date, na.rm = TRUE)) {
     start_date <- min(df_modis$calendar_date, na.rm = TRUE)
   }
 
-  if (end_date < min(df_modis$calendar_date, na.rm = TRUE)){
+  if (end_date < min(df_modis$calendar_date, na.rm = TRUE)) {
     end_date <- min(df_modis$calendar_date, na.rm = TRUE)
   }
 
   dates <- seq.Date(
-    start_date - 100,
-    end_date + 100,
+    start_date - days(100),
+    end_date + days(100),
     by = "day"
   )
 
@@ -138,17 +178,12 @@ fdk_match_modis <- function(
     doy = as.numeric(format(dates, "%j"))
   )
 
-  # only retain valid dates
-  dates <- dates |>
-    filter(
-      doy %in% seq(1, 365, 8)
-    )
-
   df_modis_mean <- dplyr::left_join(
     dates,
     df_modis_mean,
-    by = "date"
-  )
+    by = "date") |>
+    # only retain valid dates
+    tidyr::drop_na(fpar)
 
   #---- smoothing / gapfilling ----
 
@@ -158,17 +193,34 @@ fdk_match_modis <- function(
   # Add FAPAR, also to plumber data
   # as not available in the standard
   # dataset
-  fdk_smooth_ts(
-    df = df_modis_mean,
-    variable = "FPAR",
-    nc_file = nc_file
-  )
+  if (!is.na(nc_file)){
+    fdk_smooth_ts(
+      df = df_modis_mean,
+      variable = "FPAR",
+      nc_file = nc_file
+    )
 
-  # if the product is not plumber based
-  # also add LAI
-  fdk_smooth_ts(
+    # if the product is not plumber based
+    # also add LAI
+    fdk_smooth_ts(
       df = df_modis_mean,
       variable = "LAI",
       nc_file = nc_file
     )
+  } else {
+    fdk_smooth_ts(
+      df = df_modis_mean,
+      variable = "FPAR",
+      csv_file = csv_file
+    )
+
+    # if the product is not plumber based
+    # also add LAI
+    fdk_smooth_ts(
+      df = df_modis_mean,
+      variable = "LAI",
+      csv_file = csv_file
+    )
+  }
+
 }

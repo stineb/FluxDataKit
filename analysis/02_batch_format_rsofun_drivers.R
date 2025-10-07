@@ -6,14 +6,15 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(ingestr)
+library(rsofun)
 # lapply(list.files("R/","*.R", full.names = TRUE), source)
 
-input_path <- "/data_2/FluxDataKit/v3.4/"
+input_path <- "~/data/FluxDataKit/v3.2/fluxnet/"
 failed_sites <- readRDS(here::here("data/failed_sites.rds"))
 
 # read in sites to process
-sites <- FluxDataKit::fdk_site_info %>%
-  filter(!sitename %in% failed_sites)
+sites <- FluxDataKit::fdk_site_info
+# filter(!sitename %in% failed_sites)
 
 # # site subset------------------
 # # xxx debug
@@ -36,8 +37,7 @@ sites <- FluxDataKit::fdk_site_info %>%
 
 # loop over all sites and process them to format
 # them into the correct rsofun format
-driver_data <- lapply(sites$sitename, function(site){
-
+driver_data <- lapply(sites$sitename, function(site) {
   message(sprintf("Processing %s ----", site))
 
   message("- compiling drivers")
@@ -45,19 +45,20 @@ driver_data <- lapply(sites$sitename, function(site){
   # file to generate p-model (rsofun)
   # compatible driver data
 
- output <-
-    try(
+  output <- try(
     suppressWarnings(
       fdk_format_drivers(
-        site_info = sites |> filter(sitename == !!site),
+        site_info = sites |>
+          filter(sitename == !!site),
         path = input_path,
+        pattern = "_FULLSET_DD.{2}-.{3}.csv",
         verbose = TRUE
       )
     )
   )
 
-  if(inherits(output, "try-error")){
-    message(paste0("!!! formatting drivers failed for",site,"!!!"))
+  if (inherits(output, "try-error")) {
+    message(paste0("!!! formatting drivers failed for", site, "!!!"))
     return(NULL)
   } else {
     return(output)
@@ -71,7 +72,6 @@ driver_data <- dplyr::bind_rows(driver_data)
 # apply compression to minimize space
 saveRDS(
   driver_data,
-  "/data_2/FluxDataKit/v3.4/rsofun_driver_data_v3.4.rds",
+  "~/data/FluxDataKit/v3.2/rsofun_driver_data_v3.2.rds",
   compress = "xz"
-  )
-
+)
